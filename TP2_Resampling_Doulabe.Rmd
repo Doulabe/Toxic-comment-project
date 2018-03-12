@@ -1,0 +1,245 @@
+---
+title: "TP2 Doulabe Kossi"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+
+# 1 Comparaison des intervalles de confiance
+
+## Premier programme
+```{r sampling}
+n=10; p=0.7; theta=0.07; q=1; kappa=0.02; alpha=0.05
+
+tau = (p*kappa) / (q*theta)
+
+#samples
+x = rgamma(n = n , shape = p , rate =  theta)
+y = rgamma(n = n, shape = q, rate = kappa)
+
+#
+hat_tau = function(x,y){
+  tau = mean(x)/mean(y)
+  return(tau)
+}
+
+#calcul de sigma
+
+hat_sigma = function(x,y){
+  hat_sigma2 = (var(x) / mean(y)^2) + ((mean(x)^2)*var(y)/mean(y)^4)
+  return(sqrt(hat_sigma2))
+}
+```
+
+```{r tau_sigma}
+hat_tau(x,y)
+hat_sigma(x,y)
+```
+
+## IC exact
+```{r}
+ICexact = function(x,y, alpha=alpha, p=p, q=q, tau=NULL){
+  hattau = hat_tau(x,y)
+  n = length(x)
+  q_alpha = qbeta(alpha/2, n*p, n*q)/ (1- qbeta(alpha/2, n*p, n*q))
+  q_1_alpha = qbeta(1-alpha/2, n*p, n*q) / (1- qbeta(1-alpha/2, n*p, n*q))
+  binf = p*hattau / q_1_alpha
+  bsup = p*hattau / q_alpha
+  
+if(is.null(tau)){
+  return(list(binf = binf, bsup = bsup))
+}
+  else{
+    return(list(tau_is_in = (binf < tau)*(tau < bsup), length = bsup - binf))
+  }
+}
+```
+
+```{r IC_exact}
+#icexact = ICexact(x,y,alpha, p,q, 2)
+#icexact$binf
+#icexact$bsup
+
+icexact_tau = ICexact(x,y,alpha, p,q,2)
+icexact_tau$tau_is_in
+icexact_tau$length
+```
+
+## IC approximation normale
+```{r}
+ICnormal = function(x,y, alpha=alpha, tau=NULL){
+  hattau = hat_tau(x,y)
+  hatsigma = hat_sigma(x,y)
+  n = length(x)
+  phi_alpha = qnorm(1-alpha/2)
+  binf = hattau - (hatsigma/sqrt(n)) * phi_alpha
+  bsup = hattau + (hatsigma/sqrt(n)) * phi_alpha
+  
+if(is.null(tau)){
+  return(list(binf = binf, bsup = bsup))
+}
+  else{
+    return(list(tau_is_in = (binf < tau)*(tau < bsup), length = bsup - binf))
+  }
+}
+```
+
+```{r IC_normal}
+icnorm_tau = ICnormal(x,y,alpha,2)
+icnorm_tau$tau_is_in
+icnorm_tau$length
+```
+
+##IC par bootstrap basique
+```{r}
+ICboot_basic = function(x,y, alpha=alpha, B, tau=NULL){
+tau_boot = rep(0, B)
+n = length(x)
+for(b in 1:B){
+  sample_boot = sample(n, size=n, replace = TRUE)
+  tau_boot[b] = hat_tau(x[sample_boot], y[sample_boot])
+}
+tau_boot_ordered = sort(tau_boot)
+
+  hattau = hat_tau(x,y)
+  binf = 2*hattau - tau_boot_ordered[ceiling(B*(1-alpha/2))] 
+  bsup = 2*hattau - tau_boot_ordered[ceiling(B*(alpha/2))] 
+  
+if(is.null(tau)){
+  return(list(binf = binf, bsup = bsup))
+}
+  else{
+    return(list(tau_is_in = (binf < tau)*(tau < bsup), length = bsup - binf))
+  }
+}
+```
+
+```{r IC_basic}
+icbasic_tau = ICboot_basic(x,y,alpha,1000, 2)
+icbasic_tau$tau_is_in
+icbasic_tau$length
+```
+
+## IC percentile
+```{r}
+IC_percentile = function(x,y, alpha=alpha, B, tau=NULL){
+tau_boot = rep(0, B)
+n = length(x)
+for(b in 1:B){
+  sample_boot = sample(n, size=n, replace = TRUE)
+  tau_boot[b] = hat_tau(x[sample_boot], y[sample_boot])
+}
+tau_boot_ordered = sort(tau_boot)
+
+  hattau = hat_tau(x,y)
+  binf = tau_boot_ordered[ceiling(B*(alpha/2))]
+  bsup = tau_boot_ordered[ceiling(B*(1-alpha/2))] 
+   
+  
+if(is.null(tau)){
+  return(list(binf = binf, bsup = bsup))
+}
+  else{
+    return(list(tau_is_in = (binf < tau)*(tau < bsup), length = bsup - binf))
+  }
+}
+```
+
+```{r IC_percentile}
+icpercentile_tau = IC_percentile(x,y,alpha,1000, 2)
+icpercentile_tau$tau_is_in
+icpercentile_tau$length
+```
+
+## IC t-bootstrap
+```{r}
+IC_t_boot = function(x,y, alpha=alpha, B, tau=NULL){
+tau_boot = rep(0, B)
+S_boot   = rep(0, B)
+sigma_boot = rep(0, B)
+n = length(x)
+hattau   = hat_tau(x,y)
+for(b in 1:B){
+  sample_boot = sample(n, size=n, replace = TRUE)
+  tau_boot[b] = hat_tau(x[sample_boot], y[sample_boot])
+  sigma_boot[b]  = hat_sigma(x[sample_boot], y[sample_boot])
+  S_boot[b]   = sqrt(n)*(tau_boot[b] - hattau)/sigma_boot[b]
+}
+S_boot_ordered = sort(S_boot)
+
+  
+  hatsigma = hat_sigma(x,y)
+      binf = hattau - ((hatsigma/sqrt(n)) * S_boot_ordered[ceiling(B*(1-alpha/2))])
+      bsup = hattau - ((hatsigma/sqrt(n)) * S_boot_ordered[ceiling(B*(alpha/2))])
+   
+  
+if(is.null(tau)){
+  return(list(binf = binf, bsup = bsup))
+}
+  else{
+    return(list(tau_is_in = (binf < tau)*(tau < bsup), length = bsup - binf))
+  }
+}
+```
+
+```{r IC_tboot}
+ictboot_tau = IC_t_boot(x,y,alpha,1000, 2)
+ictboot_tau$tau_is_in
+ictboot_tau$length
+```
+
+## Résumé
+
+```{r Comparaison1}
+lines = c("ICexact", "ICnormal", "ICboot_basique", "ICpercentile", "IC_t_boot")
+longueur = c(icexact_tau$length, icnorm_tau$length, icbasic_tau$length, icpercentile_tau$length, ictboot_tau$length)
+
+couverture = c(icexact_tau$tau_is_in, icnorm_tau$tau_is_in, icbasic_tau$tau_is_in, icpercentile_tau$tau_is_in, ictboot_tau$tau_is_in) 
+
+res = data.frame(couverture, longueur, row.names = lines)
+res
+```
+
+
+## Programme 2
+
+```{r Repeat}
+results = function(M, B, tau){
+couv_ictboot_tau = rep(0,M) ; long_icexact_tau =rep(0,M)
+couv_icexact_tau = rep(0, M); long_icnorm_tau = rep(0,M)
+couv_icnorm_tau = rep(0,M); long_icbasic_tau = rep(0,M)
+couv_icbasic_tau = rep(0,M); long_icpercentile_tau = rep(0,M)
+couv_icpercentile_tau =rep(0,M); long_ictboot_tau = rep(0,M)
+    for (m in 1:M){
+     x = rgamma(n = n , shape = p , rate =  theta)
+     y = rgamma(n = n, shape = q, rate = kappa)
+
+     couv_icexact_tau[m] = ICexact(x, y, alpha, p, q,tau)$tau_is_in
+     couv_icnorm_tau[m]  = ICnormal(x, y, alpha,tau)$tau_is_in
+     couv_icbasic_tau[m] = ICboot_basic(x, y, alpha, B, tau)$tau_is_in
+     couv_icpercentile_tau[m] = IC_percentile(x, y, alpha, B, tau)$tau_is_in
+     couv_ictboot_tau[m] = IC_t_boot(x, y, alpha, B, tau)$tau_is_in
+
+     long_icexact_tau[m] = ICexact(x, y, alpha, p, q, tau)$length
+     long_icnorm_tau[m]  = ICnormal(x, y, alpha, tau)$length
+     long_icbasic_tau[m] = ICboot_basic(x, y, alpha, B, tau)$length
+     long_icpercentile_tau[m] = IC_percentile(x,y,alpha, B, tau)$length
+     long_ictboot_tau[m] = IC_t_boot(x,y,alpha, B, tau)$length
+    }
+return(list(couverture = c(mean(couv_icexact_tau), mean(couv_icnorm_tau), mean(couv_icbasic_tau), mean(couv_icpercentile_tau), mean(couv_ictboot_tau)), 
+            longueur = c(mean(long_icexact_tau), mean(long_icnorm_tau), mean(long_icbasic_tau), mean(long_icpercentile_tau), mean(long_ictboot_tau))))
+}
+```
+
+```{r Results}
+Couverture_Moyenne = results(1000, 1000, 2)$couverture
+Longueur_Moyenne   = results(1000, 1000, 2)$longueur
+comparaison = data.frame(Couverture_Moyenne, Longueur_Moyenne, row.names = lines)
+comparaison
+```
+
+On voit que sur 1000 intervalles de confiance de chaque méthode, les intervalles de confiance IC par approximation normale et IC par bootstrap basique présentent les plus petites longueurs  mais $\tau$ ne se trouve pas entre les bornes (couverture moyenne nulle). En revanche, les trois autres types d'intervalles, IC exact, IC du percentile et IC par t-boostrap ont des couvertures moyennes non nulles. Ce qui signifie que pour chacun de ces trois intervalles, $\tau$ s'est retrouvé entre les bornes inférieures et supérieures de l'intervalle.  En ce qui concerne les longueurs moyennes de ces trois intervalles, l'IC du t-bootstrap présente la plus grande valeur moyenne.
+
+En résumé, vu la couverture moyenne et la longueur moyenne des intervalles, l'on pourrait dire que l'IC du t-bootstrap est la meilleure méthode.
