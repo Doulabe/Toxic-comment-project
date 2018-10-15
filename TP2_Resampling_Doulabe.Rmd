@@ -117,14 +117,14 @@ if(is.null(tau)){
 ```
 
 ```{r IC_basic}
-icbasic_tau = ICboot_basic(x,y,alpha,1000, 2)
+icbasic_tau = ICboot_basic(x, y,alpha,1000, 2)
 icbasic_tau$tau_is_in
 icbasic_tau$length
 ```
 
 ## IC percentile
 ```{r}
-IC_percentile = function(x,y, alpha=alpha, B, tau=NULL){
+IC_percentile = function(x, y, alpha=alpha, B, tau=NULL){
 tau_boot = rep(0, B)
 n = length(x)
 for(b in 1:B){
