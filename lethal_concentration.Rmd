@@ -1,0 +1,262 @@
+---
+title: "Lethal concentration"
+author: "Kossi Doulabe & Merveille Savi"
+date: "04/05/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+Abbott <- function(d, x, t){ 
+     # if(any(d == 0)){
+      ab <- 1 - ((t - x)/(t[d == 0]-x[d == 0]))
+      #else {ab <- 1 - ((t - x)/t); warning("No need to apply the Abbott correction")}
+      ab <- ifelse(ab < 0, yes = 0, no = ab)
+      ab
+} 
+```
+
+```{r}
+# The following help to select the binomial family link 
+#family <- function ( i ){ 
+#  if (i == 1){family = binomial(link = "probit")} 
+ #   else if (i == 2){family = binomial(link = "logit")} 
+  #    else {family = binomial(link = "cloglog")} 
+  #family 
+#}
+```
+
+```{r}
+reg <- function(Abb, dose, link){
+  instruc <- paste0(
+    "glm(Abb ~ ", 
+    paste(paste0("dose, family = stats::quasibinomial(link =", link,")"), collapse = ""),
+    ")"
+  )
+  eval(parse(text = instruc))
+}
+#quasibinomial instead of binomial distribution 
+
+
+#ab <- Abbott(d , x, t)
+
+#mynewdat <- data.frame(d, x, t, ab)
+#mynewdat <- mynewdat[!d == 0, ]
+
+#model <- list()
+#links <- c("probit", "logit", "cloglog")
+
+#for(l in seq_along(links)){
+#model[[l]] <- reg(Abb = mynewdat$ab, dose = log(mynewdat$d), link = links[l])
+#}
+
+#model
+
+#b <- which.min(sapply(model, FUN = deviance))
+#b <- which.min(c(deviance(mod[[1]]), deviance(mod[[2]]), deviance(mod[[3]]) )) # Compare and select the best link 
+#cat("The best model is the one with", links[b],"link \n") 
+# Gives the output of the previous comparison 
+
+#Resum <- summary( model[[b]] ) 
+```
+
+
+```{r}
+# The function lc() in the open source of R 
+#rm(list=ls()) # Clears the memory of R 
+#library(MASS) 
+# Load the package useful for the determination of lethal concentrations 
+lc <- function(d, x, t, prob = c(0.50,0.90,0.95)){ 
+# This function has three main entries that are the concentrations of effluents (d), the number of dead (x) after treatment and the total number of species (t) that received effluent concentrations (lc) 
+#options(warn = -1) # This is to avoid warming alerts 
+# The following function will compute the corrected mortality rates 
+  
+  ab <- Abbott(d, x, t) 
+  mynewdat <- data.frame(d, x, t, ab)
+  mynewdat <- mynewdat[!d == 0, ] 
+# This part removed the control which is no more useful for the determination of l.c 
+mod <- vector(mode = 'list', length = 3) 
+links <- c("probit", "logit", "cloglog")
+
+  for(l in seq_along(links)){
+      if( all(d < 1) ){
+        mod[[l]] <- reg(Abb = mynewdat$ab, dose = mynewdat$d, link = links[l]) #to avoid negative values of doses in dose.p
+         } else {
+                  mod[[l]] <- reg(Abb = mynewdat$ab, dose = log(mynewdat$d), link = links[l])
+                } 
+  }
+b <- which.min(sapply(mod, FUN = deviance))
+#b <- which.min(c(deviance(mod[[1]]), deviance(mod[[2]]), deviance(mod[[3]]) )) # Compare and select the best link 
+#cat("The best model is the one with", links[b],"link \n") 
+# Gives the output of the previous comparison 
+
+Resum <- summary( mod[[b]] ) 
+ld <- MASS::dose.p(mod[[b]], p = prob) # Computation of lethal concentrations 50, 90 and 95 but may also 10, 20, 80 etc… 
+ld.ci <- ld + attr(ld, "SE") %*% matrix(qnorm(1 - 0.05/2)*c(-1,1), nrow = 1) # Defines the confidence intervals 
+
+ld.est <- round(cbind(exp(as.vector(ld)), as.vector(attr(ld, "SE")), exp(ld.ci[,1]), exp(ld.ci[,2])), 3)
+
+dimnames(ld.est)[[2]] <- c("LD", "SE", "LCL","UCL") # Return the lethal concentrations and their confidence intervals 
+#Goodness of fit of the model 
+x1 = seq(min(d), max(d), len = length(mynewdat$d)) 
+lpredmod <- predict(mod[[b]], data.frame(d = x1), type = "response")  
+comparison <- pchisq(deviance(mod[[b]]), mod[[b]]$df.residual, lower.tail = FALSE) 
+# Comparison of deviance
+R2_Naglekerke <- round((1 - exp((mod[[b]]$dev - mod[[b]]$null)/sum(t)))/(1 - exp(- mod[[b]]$null/sum(t))), 3) 
+#Determination of  Naglekerke R square 
+out <- list(Resum = Resum, ld.est = ld.est, comparison = comparison, R2_Naglekerke = R2_Naglekerke, prediction = lpredmod, d = d, Abbot = ab, x1 = x1) 
+class(out) <- "lc"
+out 
+
+} 
+
+```
+
+
+```{r}
+#print
+print.lc <- function(x, ...){
+    cat("The best model is:\n\n")
+    print(x$Resum[["call"]],...)
+    #print(x$Resum[["coefficients"]],...)
+    cat("\n")
+    cat("\nLethal dose estimation :\n", ...)
+    print(x$ld.est, ...)
+    invisible(x)
+}
+```
+
+
+```{r}
+#summary
+summary.lc <- function(x, ...){
+  cat("Summary of the chosen model :\n", ...)
+  print(x$Resum,...)
+  cat("\n *************************\n")
+  cat("Lethal dose estimation :\n", ...)
+  print(x$ld.est, ...)
+  cat("\n *************************\n")
+  cat("Deviance comparison : \n", ...)
+  print(x$comparison, ...)
+  cat("\n *************************\n")
+  cat("Naglekerke R square : \n", ...)
+  print(x$R2_Naglekerke, ...)
+  
+  invisible(x)
+}
+```
+
+
+```{r}
+#plot
+#
+#The following part plots the curve 
+plot.lc <- function(x, main = "Mortality per concentration", xlab = "Concentration", 
+                     ylab = "Mortality rate", pch = 16, ylim = c(0, 1), ...){
+  
+  graphics::plot(x$d, x$Abbot, pch = pch, main = main, ylim = ylim, xlab = xlab, ylab = ylab, ...)
+  graphics::lines(x$x1, x$prediction, ...)
+  invisible(x)
+}
+
+```
+
+
+```{r}
+#The example 
+#d <- c(0.00, 6.25, 12.50, 25.00, 50.00, 100.00) 
+#x <- c(2,2,0,0,26,40) 
+#t <- c(40,40,40,40,40,40) 
+
+d1<-c(0,5,10,20,40)
+x1<-c(1,1,0,5,30)
+t1<-c(30,30,30,30,30) 
+#abb <- Abbott(d, x, t)
+lethal1 <- lc(d1 , x1 , t1 , prob = c(0.50,0.90,0.95, 0.99))
+lethal1
+summary(lethal1)
+plot(lethal1)
+#str(lethal)
+```
+
+```{r}
+d<-c(0.00,6.25,12.50,25.00,50.00,100.00) 
+x<-c(2,2,0,0,26,40) 
+t<-c(40,40,40,40,40,40) 
+
+Abb <- Abbott(d,x,t) 
+  mynewdat <- data.frame(d,x,t,Abb); (mynewdat = mynewdat[!d==0,]) 
+mod <- glm(Abb ~ log(d), family=quasibinomial (link = "cloglog"),data=mynewdat) 
+ld <- dose.p(mod, p=c(0.50,0.90,0.95, 0.99))
+ld.ci <- as.vector(ld) + as.vector(attr(ld, "SE")) %*% matrix(qnorm(1 - 0.05/2)*c(-1,1), nrow=1)
+ld.est <- round(cbind(exp(as.vector(ld)), as.vector(attr(ld, "SE")), exp(ld.ci[,1]), exp(ld.ci[,2])),3)
+colnames(ld.est) <- c("LD", "SE", "LCL","UCL")
+ld.est
+
+x1 = seq(min(d), max(d), 0.01) 
+jtools::effect_plot(mod, pred =x1 , interval = TRUE)
+
+lethal <- lc(d,x,t, prob = c(0.50,0.90,0.95))
+
+summary(lethal)
+plot(lethal)
+```
+
+
+```{r}
+#The example 
+d1<-c(0,5,10,20,40)
+x1<-c(1,1,0,5,30)
+t1<-c(30,30,30,30,30) 
+
+Abb <- Abbott(d1,x1,t1) 
+  mynewdat <- data.frame(d1,x1,t1,Abb)
+  (mynewdat = mynewdat[!d1==0,]) 
+mod <- glm(Abb ~ d1,family=quasibinomial(link = 'cloglog'),data=mynewdat) 
+
+summary(mod)
+
+x1 = seq(0, 1, by = 0.1)
+lpredmod <- predict(mod, newdata = data.frame(d1 = x1), type = "response") 
+
+head(lpredmod)
+
+plot(d1,Abb)
+lines(x1, lpredmod)
+
+
+ld <- dose.p(mod, p=c(0.50,0.90,0.95, 0.99))
+ld.ci <- as.vector(ld) + as.vector(attr(ld, "SE")) %*% matrix(qnorm(1 - 0.05/2)*c(-1,1), nrow=1)
+ld.est <- round(cbind(exp(as.vector(ld)), as.vector(attr(ld, "SE")), exp(ld.ci[,1]), exp(ld.ci[,2])),3)
+colnames(ld.est) <- c("LD", "SE", "LCL","UCL")
+ld.est
+
+
+lethal2 <- lc(dose,x,n, prob = c(0.50,0.90,0.95, 0.99))
+
+lethal2
+summary(lethal2)
+plot(lethal2)
+```
+
+
+
+
+```{r}
+set.seed(1245)
+d = runif(20)
+x = rpois(n = 20, lambda = 2)
+t = c(rep(4, 12), rep(6,8))
+
+Abbo <- Abbott(d,x,t) 
+  mynewdat <- data.frame(d,x,t,Abb); (mynewdat = mynewdat[!d==0,]) 
+
+
+letl <- lc(d,x,t)
+
+```
+
